@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { BrowserRouter, Routes, Route, Link, useNavigate, useParams } from 'react-router-dom'
+import { Routes, Route, Link, useNavigate, useParams } from 'react-router-dom'
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
@@ -292,97 +292,6 @@ function GameDetails() {
   )
 }
 
-function AuthPage() {
-  const nav = useNavigate()
-  const { login } = useAuth()
-  const [isLogin, setIsLogin] = useState(true)
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
-  const [adminCode, setAdminCode] = useState('')
-  const [error, setError] = useState('')
-
-  const submit = async (e) => {
-    e.preventDefault()
-    setError('')
-    try {
-      const url = isLogin ? `${API_BASE}/auth/login` : `${API_BASE}/auth/register`
-      const body = isLogin ? { email, password } : { name, email, password, admin_code: adminCode || undefined }
-      const res = await fetch(url, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-      })
-      if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
-      const data = await res.json()
-      login(data)
-      nav('/')
-    } catch (err) {
-      setError(err.message)
-    }
-  }
-
-  return (
-    <div className="min-h-[80vh] grid place-items-center">
-      <div className="w-full max-w-4xl rounded-2xl overflow-hidden shadow-xl">
-        <div className="grid grid-cols-1 md:grid-cols-2">
-          {/* Left/Brand panel */}
-          <div className="relative bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 text-white p-8 md:p-10">
-            <div className="absolute inset-0 opacity-20 bg-[radial-gradient(circle_at_20%_20%,white,transparent_40%),radial-gradient(circle_at_80%_30%,white,transparent_35%),radial-gradient(circle_at_30%_80%,white,transparent_35%)]"/>
-            <div className="relative">
-              <div className="flex items-center gap-3 mb-6">
-                <div className="h-10 w-10 rounded-lg bg-white/20 grid place-items-center font-extrabold">RS</div>
-                <div>
-                  <div className="text-2xl font-black tracking-tight">RS GAME GHOR</div>
-                  <div className="text-xs text-white/80">Play more. Pay smart. Nagad ready.</div>
-                </div>
-              </div>
-              <ul className="space-y-3 text-sm">
-                <li className="flex items-start gap-2"><span className="mt-1 h-2 w-2 rounded-full bg-white"/> ফাস্ট চেকআউট — ২ ঘন্টার মধ্যে ইমেইল ডেলিভারি</li>
-                <li className="flex items-start gap-2"><span className="mt-1 h-2 w-2 rounded-full bg-white"/> কুপন/ডিসকাউন্ট ও স্টক আপডেট রিয়েল টাইম</li>
-                <li className="flex items-start gap-2"><span className="mt-1 h-2 w-2 rounded-full bg-white"/> Nagad TRX কুইক ভেরিফাই সাপোর্ট</li>
-              </ul>
-              <div className="mt-8 text-xs text-white/70">By continuing, you agree to our Terms & Privacy.</div>
-            </div>
-          </div>
-          {/* Right/Form panel */}
-          <div className="bg-white p-6 sm:p-8">
-            <div className="flex mb-6 rounded-lg overflow-hidden border w-full">
-              <button onClick={()=>setIsLogin(true)} className={`flex-1 px-4 py-2 text-sm font-medium ${isLogin? 'bg-indigo-600 text-white':'bg-gray-50 hover:bg-gray-100'}`}>Login</button>
-              <button onClick={()=>setIsLogin(false)} className={`flex-1 px-4 py-2 text-sm font-medium ${!isLogin? 'bg-indigo-600 text-white':'bg-gray-50 hover:bg-gray-100'}`}>Register</button>
-            </div>
-            <form onSubmit={submit} className="space-y-3">
-              {!isLogin && (
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Your Name</label>
-                  <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Rafi Shanto" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-200"/>
-                </div>
-              )}
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Email</label>
-                <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-200"/>
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Password</label>
-                <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="••••••••" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-200"/>
-              </div>
-              {!isLogin && (
-                <div>
-                  <label className="block text-sm text-gray-600 mb-1">Admin Code (optional)</label>
-                  <input value={adminCode} onChange={e=>setAdminCode(e.target.value)} placeholder="Enter admin code if provided" className="w-full px-3 py-2 border rounded focus:ring-2 focus:ring-indigo-200"/>
-                </div>
-              )}
-              <button className="w-full py-2.5 bg-indigo-600 text-white rounded hover:bg-indigo-700 shadow-sm">{isLogin ? 'Login' : 'Create Account'}</button>
-            </form>
-            {error && <div className="mt-3 text-red-600 text-sm">{error}</div>}
-            <div className="mt-6 text-[11px] text-gray-500">
-              Need admin access? Use the secret admin code during registration.
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function AdminPage() {
   const saved = localStorage.getItem('auth')
   const auth = saved ? JSON.parse(saved) : null
@@ -562,19 +471,15 @@ function AdminPage() {
   )
 }
 
-function AppRouter() {
+export default function App() {
   return (
-    <BrowserRouter>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<GamesList/>} />
-          <Route path="/game/:id" element={<GameDetails/>} />
-          <Route path="/auth" element={<AuthPage/>} />
-          <Route path="/admin" element={<AdminPage/>} />
-        </Routes>
-      </Layout>
-    </BrowserRouter>
+    <Layout>
+      <Routes>
+        <Route path="/" element={<GamesList/>} />
+        <Route path="/game/:id" element={<GameDetails/>} />
+        <Route path="/auth" element={<AuthPage/>} />
+        <Route path="/admin" element={<AdminPage/>} />
+      </Routes>
+    </Layout>
   )
 }
-
-export default AppRouter
