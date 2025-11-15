@@ -46,8 +46,33 @@ function Layout({ children }) {
   )
 }
 
+function FeaturedRow({ items }) {
+  if (!items?.length) return null
+  return (
+    <div className="mb-6">
+      <h3 className="font-semibold mb-2">Featured</h3>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {items.map(g => (
+          <Link to={`/game/${g.id}`} key={g.id} className="min-w-[240px] bg-white rounded-lg shadow hover:shadow-md transition p-3">
+            <div className="aspect-video bg-gray-100 rounded overflow-hidden">
+              {g.images?.[0] ? (
+                <img src={g.images[0]} alt={g.title} className="w-full h-full object-cover"/>
+              ) : (
+                <div className="w-full h-full grid place-items-center text-gray-400">No Image</div>
+              )}
+            </div>
+            <div className="mt-2 font-medium line-clamp-1">{g.title}</div>
+            <div className="text-sm text-gray-500">৳ {g.price}</div>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function GamesList() {
   const [games, setGames] = useState([])
+  const [featured, setFeatured] = useState([])
   const [loading, setLoading] = useState(true)
   const [q, setQ] = useState('')
   const [platform, setPlatform] = useState('')
@@ -57,9 +82,14 @@ function GamesList() {
     const url = new URL(API_BASE + '/games')
     if (q) url.searchParams.set('q', q)
     if (platform) url.searchParams.set('platform', platform)
-    const res = await fetch(url)
-    const data = await res.json()
+    const [allRes, featRes] = await Promise.all([
+      fetch(url),
+      fetch(`${API_BASE}/games?featured=true`)
+    ])
+    const data = await allRes.json()
+    const feat = await featRes.json()
     setGames(data)
+    setFeatured(feat)
     setLoading(false)
   }
   useEffect(() => { load() }, [])
@@ -77,6 +107,8 @@ function GamesList() {
           <button onClick={load} className="px-3 py-2 bg-gray-100 rounded hover:bg-gray-200">Filter</button>
         </div>
       </div>
+
+      <FeaturedRow items={featured} />
 
       {loading ? <div>Loading...</div> : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -102,6 +134,49 @@ function GamesList() {
   )
 }
 
+function Reviews({ gameId }) {
+  const [reviews, setReviews] = useState([])
+  const [rating, setRating] = useState(5)
+  const [comment, setComment] = useState('')
+  const [author, setAuthor] = useState('')
+
+  const load = async () => {
+    const res = await fetch(`${API_BASE}/games/${gameId}/reviews`)
+    const data = await res.json()
+    setReviews(data)
+  }
+  useEffect(() => { load() }, [gameId])
+
+  const submit = async (e) => {
+    e.preventDefault()
+    await fetch(`${API_BASE}/games/${gameId}/reviews`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rating: Number(rating), comment, author }) })
+    setComment(''); setAuthor('')
+    load()
+  }
+
+  return (
+    <div className="mt-6">
+      <h3 className="font-semibold mb-2">Reviews</h3>
+      <form onSubmit={submit} className="grid grid-cols-1 sm:grid-cols-4 gap-2 mb-3">
+        <input value={author} onChange={e=>setAuthor(e.target.value)} placeholder="Name (optional)" className="px-3 py-2 border rounded"/>
+        <select value={rating} onChange={e=>setRating(e.target.value)} className="px-3 py-2 border rounded">
+          {[1,2,3,4,5].map(n=> <option key={n} value={n}>{n} Star</option>)}
+        </select>
+        <input value={comment} onChange={e=>setComment(e.target.value)} placeholder="Write a review" className="px-3 py-2 border rounded sm:col-span-2"/>
+        <button className="px-3 py-2 bg-gray-900 text-white rounded">Submit</button>
+      </form>
+      <div className="space-y-2">
+        {reviews.map(r => (
+          <div key={r.id} className="bg-white border rounded p-3">
+            <div className="text-sm text-gray-600">{r.author || 'Anonymous'} • {r.rating}★</div>
+            <div>{r.comment}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function GameDetails() {
   const { id } = useParams()
   const [game, setGame] = useState(null)
@@ -110,6 +185,8 @@ function GameDetails() {
   const [nagadNumber, setNagadNumber] = useState('')
   const [trx, setTrx] = useState('')
   const [note, setNote] = useState('')
+  const [coupon, setCoupon] = useState('')
+  const [couponInfo, setCouponInfo] = useState(null)
   const [success, setSuccess] = useState('')
   const [error, setError] = useState('')
 
@@ -124,6 +201,20 @@ function GameDetails() {
     run()
   }, [id])
 
+  const checkCoupon = async () => {
+    if (!coupon) return
+    const res = await fetch(`${API_BASE}/coupons/validate`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: coupon, game_id: id }) })
+    const data = await res.json()
+    setCouponInfo(data)
+  }
+
+  const verifyTrx = async () => {
+    if (!trx) return
+    const res = await fetch(`${API_BASE}/verify/nagad`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nagad_number: nagadNumber, transaction_id: trx, amount: game?.price }) })
+    const data = await res.json()
+    alert(data.verified ? 'TRX looks valid.' : `Not verified: ${data.reason || ''}`)
+  }
+
   const submit = async (e) => {
     e.preventDefault()
     setError(''); setSuccess('')
@@ -131,12 +222,12 @@ function GameDetails() {
       const res = await fetch(`${API_BASE}/orders`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: id, buyer_email: buyerEmail, nagad_number: nagadNumber, transaction_id: trx, note })
+        body: JSON.stringify({ game_id: id, buyer_email: buyerEmail, nagad_number: nagadNumber, transaction_id: trx, note, coupon_code: coupon || undefined })
       })
       if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
-      const data = await res.json()
+      await res.json()
       setSuccess('অর্ডার সফল হয়েছে! ২ ঘন্টার ভিতরে ইমেইলে পেয়ে যাবেন।')
-      setBuyerEmail(''); setNagadNumber(''); setTrx(''); setNote('')
+      setBuyerEmail(''); setNagadNumber(''); setTrx(''); setNote(''); setCoupon(''); setCouponInfo(null)
     } catch (err) {
       setError(err.message)
     }
@@ -144,6 +235,8 @@ function GameDetails() {
 
   if (loading) return <div>Loading...</div>
   if (!game) return <div>Not found</div>
+
+  const discounted = couponInfo?.valid ? Math.round(game.price * (1 - couponInfo.discount_percent/100) * 100) / 100 : game.price
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -153,22 +246,36 @@ function GameDetails() {
         </div>
         <h1 className="mt-4 text-2xl font-bold">{game.title}</h1>
         <p className="text-gray-600 mt-2 whitespace-pre-wrap">{game.description}</p>
+        <Reviews gameId={id} />
       </div>
       <div className="bg-white rounded-lg shadow p-5 h-fit">
-        <div className="text-xl font-bold text-indigo-600">৳ {game.price}</div>
-        <div className="text-sm text-gray-500 mb-4">Platform: {game.platform?.toUpperCase()}</div>
-        <ol className="list-decimal list-inside text-sm text-gray-700 bg-indigo-50 p-3 rounded">
+        <div className="text-xl font-bold text-indigo-600">৳ {discounted} {couponInfo?.valid && <span className="text-sm text-gray-500 line-through ml-2">৳ {game.price}</span>}</div>
+        <div className="text-sm text-gray-500">Platform: {game.platform?.toUpperCase()}</div>
+        <div className="text-sm mt-1">Stock: {game.stock_count ?? 0} {(!game.in_stock || (game.stock_count ?? 0) <= 0) && <span className="text-red-600">(Out of stock)</span>}</div>
+        <ol className="list-decimal list-inside text-sm text-gray-700 bg-indigo-50 p-3 rounded mt-3">
           <li>Nagad এ Send Money করুন (Merchant নয়)</li>
           <li>Transaction ID (TRX) কপি করুন</li>
           <li>নিচের ফর্মটি পূরণ করুন — ইমেইলে গেম রিসিভ করবেন</li>
           <li>২ ঘন্টার মধ্যে অর্ডার সম্পন্ন হবে</li>
         </ol>
+        <div className="mt-3 flex gap-2">
+          <input value={coupon} onChange={e=>setCoupon(e.target.value)} placeholder="Coupon code" className="flex-1 px-3 py-2 border rounded"/>
+          <button onClick={checkCoupon} className="px-3 py-2 bg-gray-100 rounded">Apply</button>
+        </div>
+        {couponInfo && (
+          <div className={`mt-2 text-sm ${couponInfo.valid ? 'text-green-700':'text-red-600'}`}>
+            {couponInfo.valid ? `Coupon applied: -${couponInfo.discount_percent}%` : `Invalid: ${couponInfo.reason || ''}`}
+          </div>
+        )}
         <form onSubmit={submit} className="mt-4 space-y-3">
           <input required type="email" value={buyerEmail} onChange={e=>setBuyerEmail(e.target.value)} placeholder="আপনার ইমেইল" className="w-full px-3 py-2 border rounded"/>
           <input required value={nagadNumber} onChange={e=>setNagadNumber(e.target.value)} placeholder="Nagad Number" className="w-full px-3 py-2 border rounded"/>
-          <input required value={trx} onChange={e=>setTrx(e.target.value)} placeholder="Transaction ID (TRX)" className="w-full px-3 py-2 border rounded"/>
+          <div className="flex gap-2">
+            <input required value={trx} onChange={e=>setTrx(e.target.value)} placeholder="Transaction ID (TRX)" className="flex-1 px-3 py-2 border rounded"/>
+            <button type="button" onClick={verifyTrx} className="px-3 py-2 bg-gray-100 rounded">Quick Verify</button>
+          </div>
           <textarea value={note} onChange={e=>setNote(e.target.value)} placeholder="Note (optional)" className="w-full px-3 py-2 border rounded"/>
-          <button className="w-full py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">অর্ডার কনফার্ম</button>
+          <button disabled={!game.in_stock || (game.stock_count ?? 0) <= 0} className="w-full py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50">অর্ডার কনফার্ম</button>
         </form>
         {success && <div className="mt-3 text-green-600 text-sm">{success}</div>}
         {error && <div className="mt-3 text-red-600 text-sm">{error}</div>}
@@ -238,16 +345,20 @@ function AdminPage() {
 
   const [games, setGames] = useState([])
   const [orders, setOrders] = useState([])
-  const [form, setForm] = useState({ title:'', description:'', price:'', platform:'pc', category:'', images:'', in_stock:true })
+  const [coupons, setCoupons] = useState([])
+  const [form, setForm] = useState({ title:'', description:'', price:'', platform:'pc', category:'', images:'', in_stock:true, stock_count:0, featured:false })
+  const [couponForm, setCouponForm] = useState({ code:'', discount_percent:'', active:true, expires_at:'' })
   const [message, setMessage] = useState('')
 
   const headers = useMemo(() => ({ 'Content-Type': 'application/json', 'x-auth-token': token || '' }), [token])
 
   const load = async () => {
-    const g = await fetch(`${API_BASE}/games`).then(r=>r.json())
-    setGames(g)
-    const o = await fetch(`${API_BASE}/admin/orders`, { headers }).then(async r=> r.ok? r.json(): [])
-    setOrders(o)
+    const [g, o, c] = await Promise.all([
+      fetch(`${API_BASE}/games`).then(r=>r.json()),
+      fetch(`${API_BASE}/admin/orders`, { headers }).then(async r=> r.ok? r.json(): []),
+      fetch(`${API_BASE}/admin/coupons`, { headers }).then(async r=> r.ok? r.json(): [])
+    ])
+    setGames(g); setOrders(o); setCoupons(c)
   }
   useEffect(() => { load() }, [])
 
@@ -255,10 +366,10 @@ function AdminPage() {
     e.preventDefault()
     setMessage('')
     try {
-      const payload = { ...form, price: Number(form.price), images: form.images ? form.images.split(',').map(s=>s.trim()).filter(Boolean) : [] }
+      const payload = { ...form, price: Number(form.price), stock_count: Number(form.stock_count)||0, images: form.images ? form.images.split(',').map(s=>s.trim()).filter(Boolean) : [] }
       const res = await fetch(`${API_BASE}/admin/games`, { method:'POST', headers, body: JSON.stringify(payload) })
       if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
-      setForm({ title:'', description:'', price:'', platform:'pc', category:'', images:'', in_stock:true })
+      setForm({ title:'', description:'', price:'', platform:'pc', category:'', images:'', in_stock:true, stock_count:0, featured:false })
       setMessage('নতুন গেম যোগ হয়েছে')
       load()
     } catch (e) { setMessage(e.message) }
@@ -275,73 +386,127 @@ function AdminPage() {
     load()
   }
 
-  return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <div className="lg:col-span-1 bg-white rounded-lg shadow p-4 h-fit">
-        <h2 className="font-semibold mb-3">Add New Game</h2>
-        <form onSubmit={submitGame} className="space-y-2">
-          <input value={form.title} onChange={e=>setForm(v=>({...v,title:e.target.value}))} placeholder="Title" className="w-full px-3 py-2 border rounded"/>
-          <textarea value={form.description} onChange={e=>setForm(v=>({...v,description:e.target.value}))} placeholder="Description" className="w-full px-3 py-2 border rounded"/>
-          <input value={form.price} onChange={e=>setForm(v=>({...v,price:e.target.value}))} placeholder="Price (BDT)" className="w-full px-3 py-2 border rounded"/>
-          <select value={form.platform} onChange={e=>setForm(v=>({...v,platform:e.target.value}))} className="w-full px-3 py-2 border rounded">
-            <option value="pc">PC</option>
-            <option value="mobile">Mobile</option>
-          </select>
-          <input value={form.category} onChange={e=>setForm(v=>({...v,category:e.target.value}))} placeholder="Category" className="w-full px-3 py-2 border rounded"/>
-          <input value={form.images} onChange={e=>setForm(v=>({...v,images:e.target.value}))} placeholder="Image URLs (comma separated)" className="w-full px-3 py-2 border rounded"/>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.in_stock} onChange={e=>setForm(v=>({...v,in_stock:e.target.checked}))}/> In Stock</label>
-          <button className="w-full py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Add Game</button>
-        </form>
-        {message && <div className="mt-2 text-sm">{message}</div>}
-      </div>
+  const submitCoupon = async (e) => {
+    e.preventDefault()
+    const payload = { ...couponForm, discount_percent: Number(couponForm.discount_percent), code: couponForm.code.toUpperCase() }
+    await fetch(`${API_BASE}/admin/coupons`, { method:'POST', headers, body: JSON.stringify(payload) })
+    setCouponForm({ code:'', discount_percent:'', active:true, expires_at:'' })
+    load()
+  }
 
-      <div className="lg:col-span-2 space-y-6">
-        <div className="bg-white rounded-lg shadow p-4">
-          <h2 className="font-semibold mb-3">Games</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {games.map(g => (
-              <div key={g.id} className="border rounded p-3 flex gap-3 items-center">
-                <div className="w-24 h-16 bg-gray-100 rounded overflow-hidden">
-                  {g.images?.[0] ? <img src={g.images[0]} className="w-full h-full object-cover"/> : null}
-                </div>
-                <div className="flex-1">
-                  <div className="font-medium">{g.title}</div>
-                  <div className="text-sm text-gray-500">৳ {g.price} • {g.platform?.toUpperCase()}</div>
-                </div>
-                <button onClick={()=>delGame(g.id)} className="px-2 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200">Delete</button>
-              </div>
-            ))}
-          </div>
+  const toggleCoupon = async (c) => {
+    await fetch(`${API_BASE}/admin/coupons/${c.id}`, { method:'PUT', headers, body: JSON.stringify({ active: !c.active }) })
+    load()
+  }
+
+  const delCoupon = async (c) => {
+    if (!confirm('Delete coupon?')) return
+    await fetch(`${API_BASE}/admin/coupons/${c.id}`, { method:'DELETE', headers })
+    load()
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-1 bg-white rounded-lg shadow p-4 h-fit">
+          <h2 className="font-semibold mb-3">Add New Game</h2>
+          <form onSubmit={submitGame} className="space-y-2">
+            <input value={form.title} onChange={e=>setForm(v=>({...v,title:e.target.value}))} placeholder="Title" className="w-full px-3 py-2 border rounded"/>
+            <textarea value={form.description} onChange={e=>setForm(v=>({...v,description:e.target.value}))} placeholder="Description" className="w-full px-3 py-2 border rounded"/>
+            <input value={form.price} onChange={e=>setForm(v=>({...v,price:e.target.value}))} placeholder="Price (BDT)" className="w-full px-3 py-2 border rounded"/>
+            <select value={form.platform} onChange={e=>setForm(v=>({...v,platform:e.target.value}))} className="w-full px-3 py-2 border rounded">
+              <option value="pc">PC</option>
+              <option value="mobile">Mobile</option>
+            </select>
+            <input value={form.category} onChange={e=>setForm(v=>({...v,category:e.target.value}))} placeholder="Category" className="w-full px-3 py-2 border rounded"/>
+            <input value={form.images} onChange={e=>setForm(v=>({...v,images:e.target.value}))} placeholder="Image URLs (comma separated)" className="w-full px-3 py-2 border rounded"/>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.in_stock} onChange={e=>setForm(v=>({...v,in_stock:e.target.checked}))}/> In Stock</label>
+              <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.featured} onChange={e=>setForm(v=>({...v,featured:e.target.checked}))}/> Featured</label>
+            </div>
+            <input value={form.stock_count} onChange={e=>setForm(v=>({...v,stock_count:e.target.value}))} placeholder="Stock count" className="w-full px-3 py-2 border rounded"/>
+            <button className="w-full py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700">Add Game</button>
+          </form>
+          {message && <div className="mt-2 text-sm">{message}</div>}
         </div>
 
-        <div className="bg-white rounded-lg shadow p-4">
-          <h2 className="font-semibold mb-3">Orders</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-gray-600">
-                  <th className="py-2">Buyer</th>
-                  <th>TRX</th>
-                  <th>Status</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {orders.map(o => (
-                  <tr key={o.id} className="border-t">
-                    <td className="py-2">{o.buyer_email}</td>
-                    <td>{o.transaction_id}</td>
-                    <td>{o.status}</td>
-                    <td className="space-x-2">
-                      <button onClick={()=>updateOrder(o.id,'processing')} className="px-2 py-1 bg-amber-100 text-amber-700 rounded">Processing</button>
-                      <button onClick={()=>updateOrder(o.id,'completed')} className="px-2 py-1 bg-green-100 text-green-700 rounded">Complete</button>
-                      <button onClick={()=>updateOrder(o.id,'cancelled')} className="px-2 py-1 bg-gray-100 text-gray-700 rounded">Cancel</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        <div className="lg:col-span-2 space-y-6">
+          <div className="bg-white rounded-lg shadow p-4">
+            <h2 className="font-semibold mb-3">Games</h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {games.map(g => (
+                <div key={g.id} className="border rounded p-3 flex gap-3 items-center">
+                  <div className="w-24 h-16 bg-gray-100 rounded overflow-hidden">
+                    {g.images?.[0] ? <img src={g.images[0]} className="w-full h-full object-cover"/> : null}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-medium">{g.title}</div>
+                    <div className="text-sm text-gray-500">৳ {g.price} • {g.platform?.toUpperCase()} • Stock: {g.stock_count ?? 0}</div>
+                  </div>
+                  <button onClick={()=>delGame(g.id)} className="px-2 py-1 text-sm bg-red-100 text-red-700 rounded hover:bg-red-200">Delete</button>
+                </div>
+              ))}
+            </div>
           </div>
+
+          <div className="bg-white rounded-lg shadow p-4">
+            <h2 className="font-semibold mb-3">Orders</h2>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="py-2">Buyer</th>
+                    <th>TRX</th>
+                    <th>Coupon</th>
+                    <th>Total</th>
+                    <th>Status</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {orders.map(o => (
+                    <tr key={o.id} className="border-t">
+                      <td className="py-2">{o.buyer_email}</td>
+                      <td>{o.transaction_id}</td>
+                      <td>{o.coupon_code || '-'}</td>
+                      <td>{o.total_price ?? '-'}</td>
+                      <td>{o.status}</td>
+                      <td className="space-x-2">
+                        <button onClick={()=>updateOrder(o.id,'processing')} className="px-2 py-1 bg-amber-100 text-amber-700 rounded">Processing</button>
+                        <button onClick={()=>updateOrder(o.id,'completed')} className="px-2 py-1 bg-green-100 text-green-700 rounded">Complete</button>
+                        <button onClick={()=>updateOrder(o.id,'cancelled')} className="px-2 py-1 bg-gray-100 text-gray-700 rounded">Cancel</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg shadow p-4">
+        <h2 className="font-semibold mb-3">Coupons</h2>
+        <form onSubmit={submitCoupon} className="grid grid-cols-1 md:grid-cols-5 gap-2 mb-3">
+          <input value={couponForm.code} onChange={e=>setCouponForm(v=>({...v,code:e.target.value}))} placeholder="CODE" className="px-3 py-2 border rounded"/>
+          <input value={couponForm.discount_percent} onChange={e=>setCouponForm(v=>({...v,discount_percent:e.target.value}))} placeholder="Discount %" className="px-3 py-2 border rounded"/>
+          <input value={couponForm.expires_at} onChange={e=>setCouponForm(v=>({...v,expires_at:e.target.value}))} placeholder="Expires (YYYY-MM-DD)" className="px-3 py-2 border rounded"/>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={couponForm.active} onChange={e=>setCouponForm(v=>({...v,active:e.target.checked}))}/> Active</label>
+          <button className="px-3 py-2 bg-indigo-600 text-white rounded">Add</button>
+        </form>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {coupons.map(c => (
+            <div key={c.id} className="border rounded p-3 flex items-center justify-between">
+              <div>
+                <div className="font-medium">{c.code} • {c.discount_percent}%</div>
+                <div className="text-sm text-gray-500">Active: {String(c.active)}{c.expires_at ? ` • Expires: ${c.expires_at}`: ''}</div>
+              </div>
+              <div className="space-x-2">
+                <button onClick={()=>toggleCoupon(c)} className="px-2 py-1 bg-gray-100 rounded">{c.active?'Disable':'Enable'}</button>
+                <button onClick={()=>delCoupon(c)} className="px-2 py-1 bg-red-100 text-red-700 rounded">Delete</button>
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>
