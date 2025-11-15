@@ -3,6 +3,21 @@ import { Routes, Route, Link, useNavigate, useParams } from 'react-router-dom'
 
 const API_BASE = import.meta.env.VITE_BACKEND_URL || 'http://localhost:8000'
 
+async function jfetch(input, init) {
+  try {
+    const res = await fetch(input, init)
+    const ct = res.headers.get('content-type') || ''
+    if (!res.ok) {
+      const msg = ct.includes('application/json') ? (await res.json()).detail || res.statusText : res.statusText
+      return { ok: false, data: null, error: msg }
+    }
+    const data = ct.includes('application/json') ? await res.json() : null
+    return { ok: true, data }
+  } catch (e) {
+    return { ok: false, data: null, error: e.message }
+  }
+}
+
 function useAuth() {
   const [user, setUser] = useState(() => {
     const saved = localStorage.getItem('auth')
@@ -82,23 +97,26 @@ function GamesList() {
   const [games, setGames] = useState([])
   const [featured, setFeatured] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [q, setQ] = useState('')
   const [platform, setPlatform] = useState('')
 
   const load = async () => {
-    setLoading(true)
-    const url = new URL(API_BASE + '/games')
-    if (q) url.searchParams.set('q', q)
-    if (platform) url.searchParams.set('platform', platform)
-    const [allRes, featRes] = await Promise.all([
-      fetch(url),
-      fetch(`${API_BASE}/games?featured=true`)
-    ])
-    const data = await allRes.json()
-    const feat = await featRes.json()
-    setGames(data)
-    setFeatured(feat)
-    setLoading(false)
+    setLoading(true); setError('')
+    try {
+      const url = new URL(API_BASE + '/games')
+      if (q) url.searchParams.set('q', q)
+      if (platform) url.searchParams.set('platform', platform)
+      const [all, feat] = await Promise.all([
+        jfetch(url.toString()),
+        jfetch(`${API_BASE}/games?featured=true`)
+      ])
+      setGames(all.ok && Array.isArray(all.data) ? all.data : [])
+      setFeatured(feat.ok && Array.isArray(feat.data) ? feat.data : [])
+      if (!all.ok) setError(all.error || 'Failed to load games')
+    } finally {
+      setLoading(false)
+    }
   }
   useEffect(() => { load() }, [])
 
@@ -115,6 +133,12 @@ function GamesList() {
           <button onClick={load} className="px-3 py-2 bg-gray-100 rounded hover:bg-gray-200">Filter</button>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 p-3 rounded bg-red-50 text-red-700 text-sm">
+          {error}. Please check your internet or try again.
+        </div>
+      )}
 
       <FeaturedRow items={featured} />
 
@@ -149,15 +173,14 @@ function Reviews({ gameId }) {
   const [author, setAuthor] = useState('')
 
   const load = async () => {
-    const res = await fetch(`${API_BASE}/games/${gameId}/reviews`)
-    const data = await res.json()
-    setReviews(data)
+    const r = await jfetch(`${API_BASE}/games/${gameId}/reviews`)
+    setReviews(r.ok && Array.isArray(r.data) ? r.data : [])
   }
   useEffect(() => { load() }, [gameId])
 
   const submit = async (e) => {
     e.preventDefault()
-    await fetch(`${API_BASE}/games/${gameId}/reviews`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rating: Number(rating), comment, author }) })
+    await jfetch(`${API_BASE}/games/${gameId}/reviews`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ rating: Number(rating), comment, author }) })
     setComment(''); setAuthor('')
     load()
   }
@@ -201,9 +224,8 @@ function GameDetails() {
   useEffect(() => {
     const run = async () => {
       setLoading(true)
-      const res = await fetch(`${API_BASE}/games/${id}`)
-      const data = await res.json()
-      setGame(data)
+      const r = await jfetch(`${API_BASE}/games/${id}`)
+      setGame(r.ok ? r.data : null)
       setLoading(false)
     }
     run()
@@ -211,38 +233,34 @@ function GameDetails() {
 
   const checkCoupon = async () => {
     if (!coupon) return
-    const res = await fetch(`${API_BASE}/coupons/validate`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: coupon, game_id: id }) })
-    const data = await res.json()
-    setCouponInfo(data)
+    const r = await jfetch(`${API_BASE}/coupons/validate`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ code: coupon, game_id: id }) })
+    setCouponInfo(r.ok ? r.data : { valid: false, reason: r.error || 'Could not validate' })
   }
 
   const verifyTrx = async () => {
     if (!trx) return
-    const res = await fetch(`${API_BASE}/verify/nagad`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nagad_number: nagadNumber, transaction_id: trx, amount: game?.price }) })
-    const data = await res.json()
-    alert(data.verified ? 'TRX looks valid.' : `Not verified: ${data.reason || ''}`)
+    const r = await jfetch(`${API_BASE}/verify/nagad`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ nagad_number: nagadNumber, transaction_id: trx, amount: game?.price }) })
+    alert(r.ok && r.data?.verified ? 'TRX looks valid.' : `Not verified: ${r.error || r.data?.reason || ''}`)
   }
 
   const submit = async (e) => {
     e.preventDefault()
     setError(''); setSuccess('')
-    try {
-      const res = await fetch(`${API_BASE}/orders`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ game_id: id, buyer_email: buyerEmail, nagad_number: nagadNumber, transaction_id: trx, note, coupon_code: coupon || undefined })
-      })
-      if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
-      await res.json()
-      setSuccess('অর্ডার সফল হয়েছে! ২ ঘন্টার ভিতরে ইমেইলে পেয়ে যাবেন।')
-      setBuyerEmail(''); setNagadNumber(''); setTrx(''); setNote(''); setCoupon(''); setCouponInfo(null)
-    } catch (err) {
-      setError(err.message)
+    const r = await jfetch(`${API_BASE}/orders`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ game_id: id, buyer_email: buyerEmail, nagad_number: nagadNumber, transaction_id: trx, note, coupon_code: coupon || undefined })
+    })
+    if (!r.ok) {
+      setError(r.error || 'Failed')
+      return
     }
+    setSuccess('অর্ডার সফল হয়েছে! ২ ঘন্টার ভিতরে ইমেইলে পেয়ে যাবেন।')
+    setBuyerEmail(''); setNagadNumber(''); setTrx(''); setNote(''); setCoupon(''); setCouponInfo(null)
   }
 
   if (loading) return <div>Loading...</div>
-  if (!game) return <div>Not found</div>
+  if (!game) return <div className="text-red-600">Could not load game. Please try again later.</div>
 
   const discounted = couponInfo?.valid ? Math.round(game.price * (1 - couponInfo.discount_percent/100) * 100) / 100 : game.price
 
@@ -312,54 +330,54 @@ function AdminPage() {
 
   const load = async () => {
     const [g, o, c] = await Promise.all([
-      fetch(`${API_BASE}/games`).then(r=>r.json()),
-      fetch(`${API_BASE}/admin/orders`, { headers }).then(async r=> r.ok? r.json(): []),
-      fetch(`${API_BASE}/admin/coupons`, { headers }).then(async r=> r.ok? r.json(): [])
+      jfetch(`${API_BASE}/games`),
+      jfetch(`${API_BASE}/admin/orders`, { headers }),
+      jfetch(`${API_BASE}/admin/coupons`, { headers })
     ])
-    setGames(g); setOrders(o); setCoupons(c)
+    setGames(g.ok && Array.isArray(g.data) ? g.data : [])
+    setOrders(o.ok && Array.isArray(o.data) ? o.data : [])
+    setCoupons(c.ok && Array.isArray(c.data) ? c.data : [])
   }
   useEffect(() => { load() }, [])
 
   const submitGame = async (e) => {
     e.preventDefault()
     setMessage('')
-    try {
-      const payload = { ...form, price: Number(form.price), stock_count: Number(form.stock_count)||0, images: form.images ? form.images.split(',').map(s=>s.trim()).filter(Boolean) : [] }
-      const res = await fetch(`${API_BASE}/admin/games`, { method:'POST', headers, body: JSON.stringify(payload) })
-      if (!res.ok) throw new Error((await res.json()).detail || 'Failed')
-      setForm({ title:'', description:'', price:'', platform:'pc', category:'', images:'', in_stock:true, stock_count:0, featured:false })
-      setMessage('নতুন গেম যোগ হয়েছে')
-      load()
-    } catch (e) { setMessage(e.message) }
+    const payload = { ...form, price: Number(form.price), stock_count: Number(form.stock_count)||0, images: form.images ? form.images.split(',').map(s=>s.trim()).filter(Boolean) : [] }
+    const r = await jfetch(`${API_BASE}/admin/games`, { method:'POST', headers, body: JSON.stringify(payload) })
+    if (!r.ok) { setMessage(r.error || 'Failed'); return }
+    setForm({ title:'', description:'', price:'', platform:'pc', category:'', images:'', in_stock:true, stock_count:0, featured:false })
+    setMessage('নতুন গেম যোগ হয়েছে')
+    load()
   }
 
   const delGame = async (id) => {
     if (!confirm('Delete this game?')) return
-    await fetch(`${API_BASE}/admin/games/${id}`, { method:'DELETE', headers })
+    await jfetch(`${API_BASE}/admin/games/${id}`, { method:'DELETE', headers })
     load()
   }
 
   const updateOrder = async (id, status) => {
-    await fetch(`${API_BASE}/admin/orders/${id}`, { method:'PUT', headers, body: JSON.stringify({ status }) })
+    await jfetch(`${API_BASE}/admin/orders/${id}`, { method:'PUT', headers, body: JSON.stringify({ status }) })
     load()
   }
 
   const submitCoupon = async (e) => {
     e.preventDefault()
     const payload = { ...couponForm, discount_percent: Number(couponForm.discount_percent), code: couponForm.code.toUpperCase() }
-    await fetch(`${API_BASE}/admin/coupons`, { method:'POST', headers, body: JSON.stringify(payload) })
+    await jfetch(`${API_BASE}/admin/coupons`, { method:'POST', headers, body: JSON.stringify(payload) })
     setCouponForm({ code:'', discount_percent:'', active:true, expires_at:'' })
     load()
   }
 
   const toggleCoupon = async (c) => {
-    await fetch(`${API_BASE}/admin/coupons/${c.id}`, { method:'PUT', headers, body: JSON.stringify({ active: !c.active }) })
+    await jfetch(`${API_BASE}/admin/coupons/${c.id}`, { method:'PUT', headers, body: JSON.stringify({ active: !c.active }) })
     load()
   }
 
   const delCoupon = async (c) => {
     if (!confirm('Delete coupon?')) return
-    await fetch(`${API_BASE}/admin/coupons/${c.id}`, { method:'DELETE', headers })
+    await jfetch(`${API_BASE}/admin/coupons/${c.id}`, { method:'DELETE', headers })
     load()
   }
 
@@ -466,6 +484,80 @@ function AdminPage() {
             </div>
           ))}
         </div>
+      </div>
+    </div>
+  )
+}
+
+function AuthPage() {
+  const nav = useNavigate()
+  const [mode, setMode] = useState('login') // 'login' | 'register'
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [msg, setMsg] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const submit = async (e) => {
+    e.preventDefault()
+    setMsg(''); setLoading(true)
+    try {
+      if (mode === 'register') {
+        const r = await jfetch(`${API_BASE}/auth/register`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, email, password }) })
+        if (!r.ok) throw new Error(r.error || 'Registration failed')
+        const data = r.data
+        localStorage.setItem('auth', JSON.stringify({ token: data.token, role: data.role, name: data.name, email: data.email }))
+        setMsg('অ্যাকাউন্ট তৈরি হয়েছে!')
+        nav('/')
+      } else {
+        const r = await jfetch(`${API_BASE}/auth/login`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ email, password }) })
+        if (!r.ok) throw new Error(r.error || 'Login failed')
+        const data = r.data
+        localStorage.setItem('auth', JSON.stringify({ token: data.token, role: data.role, name: data.name, email: data.email }))
+        setMsg('লগইন সফল')
+        nav('/')
+      }
+    } catch (e) {
+      setMsg(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-center">
+      <div className="hidden md:block">
+        <div className="h-full w-full rounded-xl bg-gradient-to-br from-indigo-600 via-violet-600 to-fuchsia-500 p-1">
+          <div className="h-full w-full rounded-[10px] bg-white/10 backdrop-blur p-8 text-white">
+            <div className="inline-flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full text-sm">RS <span className="opacity-80">GAME</span> GHOR</div>
+            <h2 className="mt-4 text-3xl font-extrabold">One-stop digital store for gamers</h2>
+            <ul className="mt-4 space-y-2 text-white/90">
+              <li>• Pay with Nagad Send Money</li>
+              <li>• 2-hour email delivery</li>
+              <li>• Coupons, reviews & featured deals</li>
+              <li>• Admin panel with stock control</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div className="bg-white shadow rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-xl font-bold">{mode === 'login' ? 'Login' : 'Create account'}</h2>
+          <button onClick={()=>setMode(mode==='login'?'register':'login')} className="text-indigo-600 hover:underline text-sm">
+            {mode === 'login' ? 'Need an account? Register' : 'Already have an account? Login'}
+          </button>
+        </div>
+        <form onSubmit={submit} className="space-y-3">
+          {mode === 'register' && (
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" className="w-full px-3 py-2 border rounded"/>
+          )}
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email" className="w-full px-3 py-2 border rounded"/>
+          <input type="password" value={password} onChange={e=>setPassword(e.target.value)} placeholder="Password" className="w-full px-3 py-2 border rounded"/>
+          <button disabled={loading} className="w-full py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 disabled:opacity-50">
+            {loading ? 'Please wait...' : (mode==='login' ? 'Login' : 'Register')}
+          </button>
+          {msg && <div className="text-sm mt-2">{msg}</div>}
+        </form>
       </div>
     </div>
   )
